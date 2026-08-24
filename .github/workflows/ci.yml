@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: firechat
+          POSTGRES_PASSWORD: firechat
+          POSTGRES_DB: firechat
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U firechat -d firechat"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 15
+
+    env:
+      DATABASE_URL: postgresql://firechat:firechat@localhost:5432/firechat?schema=public
+      JWT_SECRET: ci-secret-not-used-in-production
+      PORT: "3000"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Seed demo data
+        run: npx prisma db seed
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Start server
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3000/api/health | grep -q '"ok":true'; then
+              echo "server ready"; exit 0
+            fi
+            sleep 1
+          done
+          echo "server did not become healthy"; exit 1
+
+      - name: End-to-end smoke suite
+        run: node scripts/smoke.mjs
+
+      - name: Stop server
+        if: always()
+        run: kill %1 2>/dev/null || true

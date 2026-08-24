@@ -1,0 +1,105 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: firechat
+      POSTGRES_PASSWORD: firechat
+      POSTGRES_DB: firechat
+    volumes:
+      - firechat_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U firechat -d firechat"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379" # host 6379 is taken by another local project
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: firechat-media
+      MINIO_ROOT_PASSWORD: firechat-media-secret
+    volumes:
+      - firechat_minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+        mc alias set local http://minio:9000 firechat-media firechat-media-secret &&
+        mc mb --ignore-existing local/firechat-media
+      "
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://firechat:firechat@db:5432/firechat?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: firechat-media
+      S3_ACCESS_KEY_ID: firechat-media
+      S3_SECRET_ACCESS_KEY: firechat-media-secret
+      PORT: "3000"
+      WEB_PUSH_PUBLIC_KEY: ${WEB_PUSH_PUBLIC_KEY:-}
+      WEB_PUSH_PRIVATE_KEY: ${WEB_PUSH_PRIVATE_KEY:-}
+    ports:
+      - "3000:3000"
+    volumes:
+      - firechat_uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health | grep -q '\"ok\":true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional second node to verify multi-node delivery:
+  #   docker compose --profile scale up -d
+  app2:
+    build: .
+    restart: unless-stopped
+    profiles: ["scale"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://firechat:firechat@db:5432/firechat?schema=public
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: firechat-media
+      S3_ACCESS_KEY_ID: firechat-media
+      S3_SECRET_ACCESS_KEY: firechat-media-secret
+      PORT: "3001"
+    ports:
+      - "3001:3001"
+    volumes:
+      - firechat_uploads:/app/uploads
+
+volumes:
+  firechat_pgdata:
+  firechat_uploads:
+  firechat_minio:
+
