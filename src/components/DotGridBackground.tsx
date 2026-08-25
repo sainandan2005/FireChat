@@ -1,49 +1,47 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import DotGrid from './DotGrid';
 
-/** Resolves backdrop dot colors for the active theme. */
-function useDotColors(): { baseColor: string; activeColor: string } {
-  const [colors, setColors] = useState({
-    baseColor: '#d6d4ca',
-    activeColor: '#f54e00',
-  });
+/* theme colors as module constants — referentially stable for useSyncExternalStore */
+const LIGHT = { baseColor: '#d6d4ca', activeColor: '#f54e00' };
+const DARK = { baseColor: '#3a382f', activeColor: '#ff6a2b' };
 
-  useEffect(() => {
-    const read = () => {
-      const dark = document.documentElement.classList.contains('dark');
-      setColors({
-        baseColor: dark ? '#3a382f' : '#d6d4ca',
-        activeColor: dark ? '#ff6a2b' : '#f54e00',
-      });
-    };
-    read();
-    const observer = new MutationObserver(read);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
-  }, []);
-
-  return colors;
+function subscribeTheme(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  return () => observer.disconnect();
 }
 
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(false);
+function getThemeSnapshot() {
+  return document.documentElement.classList.contains('dark') ? DARK : LIGHT;
+}
 
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+function getServerThemeSnapshot() {
+  return LIGHT;
+}
 
-  return reduced;
+function subscribeMotion(onChange: () => void) {
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+}
+
+function getMotionSnapshot(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function getServerMotionSnapshot(): boolean {
+  return false;
 }
 
 export default function DotGridBackground() {
-  const { baseColor, activeColor } = useDotColors();
-  const reducedMotion = usePrefersReducedMotion();
+  const colors = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
+  const reducedMotion = useSyncExternalStore(
+    subscribeMotion,
+    getMotionSnapshot,
+    getServerMotionSnapshot
+  );
 
   if (reducedMotion) return null;
 
@@ -52,8 +50,8 @@ export default function DotGridBackground() {
       <DotGrid
         dotSize={5}
         gap={26}
-        baseColor={baseColor}
-        activeColor={activeColor}
+        baseColor={colors.baseColor}
+        activeColor={colors.activeColor}
         proximity={140}
         shockRadius={220}
         shockStrength={4}
