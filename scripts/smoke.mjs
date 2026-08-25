@@ -222,8 +222,9 @@ async function main() {
   const sockA = new TestSocket(`ws://localhost:3000/api/ws?token=${encodeURIComponent(tokenA)}`);
   const sockB = new TestSocket(`ws://localhost:3000/api/ws?token=${encodeURIComponent(tokenB)}`);
 
+  await sockA.connect();
   const presenceListPromise = sockB.next("presence.list");
-  await Promise.all([sockA.connect(), sockB.connect()]);
+  await sockB.connect();
   check("ws upgrade auth via ?token= (both connected)", sockA.ws.readyState === 1 && sockB.ws.readyState === 1);
 
   // ---- last seen on disconnect ----
@@ -453,8 +454,17 @@ async function main() {
   });
 
   // ---- message search ----
+  // self-contained probe: send a searchable message first (fresh CI DBs have
+  // no accumulated history to match against)
+  await sockA.request("message.send", {
+    conversationId: convId,
+    type: "TEXT",
+    content: "the search probe finds this message",
+  });
+  await sleep(200);
+
   const searchBob = await api(
-    `/api/search?q=${encodeURIComponent("carol should")}`,
+    `/api/search?q=${encodeURIComponent("search probe")}`,
     { token: tokenB }
   );
   check(
@@ -463,7 +473,7 @@ async function main() {
   );
 
   const scoped = await api(
-    `/api/search?q=${encodeURIComponent("carol should")}&conversationId=${
+    `/api/search?q=${encodeURIComponent("search probe")}&conversationId=${
       groupId ?? "none"
     }`,
     { token: tokenB }

@@ -49,6 +49,12 @@ jobs:
       - name: Seed demo data
         run: npx prisma db seed
 
+      - name: Generate VAPID keys for push tests
+        run: |
+          KEYS=$(npx web-push generate-vapid-keys --json)
+          echo "WEB_PUSH_PUBLIC_KEY=$(echo $KEYS | jq -r .publicKey)" >> $GITHUB_ENV
+          echo "WEB_PUSH_PRIVATE_KEY=$(echo $KEYS | jq -r .privateKey)" >> $GITHUB_ENV
+
       - name: Lint
         run: npm run lint
 
